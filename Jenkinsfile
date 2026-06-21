@@ -201,6 +201,40 @@ pipeline {
                     }
                 }
 
+                stage('Deploy to Kubernetes') {
+                    steps {
+                        script {
+                            env.K8S_NAMESPACE = (env.BRANCH_NAME == 'master') ? 'prod' : 'dev'
+                        }
+                        withVault(
+                            vaultSecrets: [
+                                [
+                                    path: 'secret/jenkins/kubeconfig',
+                                    secretValues: [[envVar: 'KUBECONFIG_CONTENT', vaultKey: 'config']]
+                                ],
+                                [
+                                    path: 'secret/jenkins/dockerhub',
+                                    secretValues: [[envVar: 'DOCKER_USER', vaultKey: 'username']]
+                                ]
+                            ]
+                        ) {
+                            sh '''
+                                echo "$KUBECONFIG_CONTENT" > /tmp/kubeconfig-${BUILD_NUMBER}
+                                export KUBECONFIG=/tmp/kubeconfig-${BUILD_NUMBER}
+
+                                sed "s|__DOCKER_USER__|$DOCKER_USER|g; s|__IMAGE_TAG__|$IMAGE_BRANCH_TAG|g" \
+                                  k8s/deployment-${K8S_NAMESPACE}.yaml > k8s-final-${K8S_NAMESPACE}.yaml
+
+                                kubectl apply -f k8s-final-${K8S_NAMESPACE}.yaml
+                                kubectl rollout status deployment/mvnwebapp -n ${K8S_NAMESPACE} --timeout=120s
+
+                                rm -f /tmp/kubeconfig-${BUILD_NUMBER}
+                            '''
+                            echo "Deployed to Kubernetes namespace: ${env.K8S_NAMESPACE}"
+                        }
+                    }
+                }
+
                 stage('Deploy to Tomcat') {
                     steps {
                         withVault(
