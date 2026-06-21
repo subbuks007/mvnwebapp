@@ -59,7 +59,7 @@ pipeline {
                                         ${SCANNER_HOME}/bin/sonar-scanner \
                                           -Dsonar.projectKey=mvnwebapp \
                                           -Dsonar.projectName='MVN WebApp' \
-                                          -Dsonar.sources=src/main/webapp \
+                                          -Dsonar.sources=src/main/webapp
                                     '''
                                 }
                             }
@@ -138,10 +138,17 @@ pipeline {
                                 ]
                             ]]
                         ) {
+                            script {
+                                env.IMAGE_BRANCH_TAG = (env.BRANCH_NAME == 'master') ? IMAGE_TAG : "rc-${IMAGE_TAG}"
+                            }
                             sh '''
-                                docker build -t $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG .
-                                docker tag $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG $DOCKER_USER/$IMAGE_NAME:latest
+                                docker build -t $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG .
                             '''
+                            script {
+                                if (env.BRANCH_NAME == 'master') {
+                                    sh "docker tag $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG $DOCKER_USER/$IMAGE_NAME:latest"
+                                }
+                            }
                         }
                     }
                 }
@@ -162,7 +169,7 @@ pipeline {
                                   --exit-code 0 \
                                   --format table \
                                   -o trivy-report.txt \
-                                  $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
+                                  $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG
 
                                 cat trivy-report.txt
                             '''
@@ -183,9 +190,13 @@ pipeline {
                         ) {
                             sh '''
                                 echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                                docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
-                                docker push $DOCKER_USER/$IMAGE_NAME:latest
+                                docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG
                             '''
+                            script {
+                                if (env.BRANCH_NAME == 'master') {
+                                    sh "docker push $DOCKER_USER/$IMAGE_NAME:latest"
+                                }
+                            }
                         }
                     }
                 }
@@ -202,10 +213,14 @@ pipeline {
                                 ]
                             ]]
                         ) {
+                            script {
+                                env.DEPLOY_PATH = (env.BRANCH_NAME == 'master') ? WAR_NAME : "${WAR_NAME}-staging"
+                            }
                             sh '''
                                 curl -u $TOMCAT_USER:$TOMCAT_PASS \
                                   -T target/${WAR_NAME}.war \
-                                  "$TOMCAT_URL/manager/text/deploy?path=/${WAR_NAME}&update=true"
+                                  "$TOMCAT_URL/manager/text/deploy?path=/${DEPLOY_PATH}&update=true"
+                                echo "Deployed to: $TOMCAT_URL/${DEPLOY_PATH}/"
                             '''
                         }
                     }
@@ -222,7 +237,7 @@ pipeline {
                             ]]
                         ) {
                             sh '''
-                                docker rmi $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG || true
+                                docker rmi $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG || true
                                 docker rmi $DOCKER_USER/$IMAGE_NAME:latest || true
                             '''
                         }
