@@ -54,15 +54,12 @@ pipeline {
                     parallel {
                         stage('SonarQube Full Scan') {
                             steps {
-                                sh 'mvn dependency:copy-dependencies -DoutputDirectory=target/dependency'
                                 withSonarQubeEnv('SonarQube') {
                                     sh '''
                                         ${SCANNER_HOME}/bin/sonar-scanner \
                                           -Dsonar.projectKey=mvnwebapp \
                                           -Dsonar.projectName='MVN WebApp' \
-                                          -Dsonar.sources=src/main/java \
-                                          -Dsonar.java.binaries=target/classes \
-                                          -Dsonar.java.libraries=target/dependency/*.jar
+                                          -Dsonar.sources=src/main/webapp \
                                     '''
                                 }
                             }
