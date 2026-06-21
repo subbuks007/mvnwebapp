@@ -29,15 +29,12 @@ pipeline {
                 not { changeRequest() }   // skip on PRs, full scan happens there instead
             }
             steps {
-                sh 'mvn dependency:copy-dependencies -DoutputDirectory=target/dependency'
                 withSonarQubeEnv('SonarQube') {
                     sh '''
                         ${SCANNER_HOME}/bin/sonar-scanner \
                           -Dsonar.projectKey=mvnwebapp \
                           -Dsonar.projectName='MVN WebApp' \
-                          -Dsonar.sources=src/main/java \
-                          -Dsonar.java.binaries=target/classes \
-                          -Dsonar.java.libraries=target/dependency/*.jar \
+                          -Dsonar.sources=src/main/webapp \
                           -Dsonar.qualitygate.wait=false
                     '''
                 }
