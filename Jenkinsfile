@@ -10,6 +10,7 @@ pipeline {
         IMAGE_NAME   = 'mvnwebapp'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         WAR_NAME     = 'mvnwebapp'
+        GIT_SHA      = "${GIT_COMMIT[0..6]}"   // short SHA, e.g. "a1b2c3d"
     }
 
     stages {
@@ -26,7 +27,11 @@ pipeline {
 
         stage('Fast Code Check') {
             when {
-                not { changeRequest() }   // skip on PRs, full scan happens there instead
+                allOf {
+                    not { changeRequest() }
+                    not { branch 'master' }
+                    not { branch pattern: 'release/.*', comparator: 'REGEXP' }
+                }
             }
             steps {
                 withSonarQubeEnv('SonarQube') {
@@ -120,6 +125,9 @@ pipeline {
             stages {
 
                 stage('Create Dockerfile') {
+                    when {
+                        branch pattern: 'release/.*', comparator: 'REGEXP'
+                    }
                     steps {
                         writeFile file: 'Dockerfile', text: '''
                             FROM tomcat:10-jdk17-temurin
@@ -128,7 +136,10 @@ pipeline {
                     }
                 }
 
-                stage('Docker Build') {
+                stage('Docker Build (release only)') {
+                    when {
+                        branch pattern: 'release/.*', comparator: 'REGEXP'
+                    }
                     steps {
                         withVault(
                             vaultSecrets: [[
@@ -138,22 +149,17 @@ pipeline {
                                 ]
                             ]]
                         ) {
-                            script {
-                                env.IMAGE_BRANCH_TAG = (env.BRANCH_NAME == 'master') ? IMAGE_TAG : "rc-${IMAGE_TAG}"
-                            }
                             sh '''
-                                docker build -t $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG .
+                                docker build -t $DOCKER_USER/$IMAGE_NAME:rc-$GIT_SHA .
                             '''
-                            script {
-                                if (env.BRANCH_NAME == 'master') {
-                                    sh "docker tag $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG $DOCKER_USER/$IMAGE_NAME:latest"
-                                }
-                            }
                         }
                     }
                 }
 
-                stage('Trivy Security Scan') {
+                stage('Trivy Security Scan (release only)') {
+                    when {
+                        branch pattern: 'release/.*', comparator: 'REGEXP'
+                    }
                     steps {
                         withVault(
                             vaultSecrets: [[
@@ -169,7 +175,7 @@ pipeline {
                                   --exit-code 0 \
                                   --format table \
                                   -o trivy-report.txt \
-                                  $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG
+                                  $DOCKER_USER/$IMAGE_NAME:rc-$GIT_SHA
 
                                 cat trivy-report.txt
                             '''
@@ -177,7 +183,10 @@ pipeline {
                     }
                 }
 
-                stage('Docker Push') {
+                stage('Docker Push RC (release only)') {
+                    when {
+                        branch pattern: 'release/.*', comparator: 'REGEXP'
+                    }
                     steps {
                         withVault(
                             vaultSecrets: [[
@@ -190,12 +199,51 @@ pipeline {
                         ) {
                             sh '''
                                 echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                                docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_BRANCH_TAG
+                                docker push $DOCKER_USER/$IMAGE_NAME:rc-$GIT_SHA
+                            '''
+                        }
+                        script {
+                            env.IMAGE_BRANCH_TAG = "rc-${GIT_SHA}"
+                        }
+                    }
+                }
+
+                stage('Promote RC to Production (master only)') {
+                    when {
+                        branch 'master'
+                    }
+                    steps {
+                        withVault(
+                            vaultSecrets: [[
+                                path: 'secret/jenkins/dockerhub',
+                                secretValues: [
+                                    [envVar: 'DOCKER_USER', vaultKey: 'username'],
+                                    [envVar: 'DOCKER_PASS', vaultKey: 'password']
+                                ]
+                            ]]
+                        ) {
+                            sh '''
+                                echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+
+                                # GIT_PREVIOUS_COMMIT = the commit that was on release/1.0
+                                # before this merge commit landed on master.
+                                # That commit's short SHA is what release/1.0 tagged as rc-<sha>.
+                                MERGE_PARENT_SHA=$(git log -1 --pretty=%P HEAD | awk '{print $2}' | cut -c1-7)
+
+                                echo "Looking for release candidate: rc-$MERGE_PARENT_SHA"
+
+                                docker pull $DOCKER_USER/$IMAGE_NAME:rc-$MERGE_PARENT_SHA
+
+                                docker tag $DOCKER_USER/$IMAGE_NAME:rc-$MERGE_PARENT_SHA $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
+                                docker tag $DOCKER_USER/$IMAGE_NAME:rc-$MERGE_PARENT_SHA $DOCKER_USER/$IMAGE_NAME:latest
+
+                                docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
+                                docker push $DOCKER_USER/$IMAGE_NAME:latest
+
+                                echo "IMAGE_BRANCH_TAG=$IMAGE_TAG" > image-tag.env
                             '''
                             script {
-                                if (env.BRANCH_NAME == 'master') {
-                                    sh "docker push $DOCKER_USER/$IMAGE_NAME:latest"
-                                }
+                                env.IMAGE_BRANCH_TAG = env.IMAGE_TAG
                             }
                         }
                     }
