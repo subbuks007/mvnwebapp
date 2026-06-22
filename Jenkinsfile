@@ -274,7 +274,7 @@ pipeline {
                                   k8s/deployment-${K8S_NAMESPACE}.yaml > k8s-final-${K8S_NAMESPACE}.yaml
 
                                 kubectl apply -f k8s-final-${K8S_NAMESPACE}.yaml
-                                kubectl rollout status deployment/mvnwebapp -n ${K8S_NAMESPACE} --timeout=120s
+                                kubectl rollout status deployment/mvnwebapp -n ${K8S_NAMESPACE} --timeout=600s
 
                                 rm -f /tmp/kubeconfig-${BUILD_NUMBER}
                             '''
