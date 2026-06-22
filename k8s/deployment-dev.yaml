@@ -34,13 +34,13 @@ spec:
             httpGet:
               path: /mvnwebapp/
               port: 8080
-            initialDelaySeconds: 15
+            initialDelaySeconds: 180
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /mvnwebapp/
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 240
             periodSeconds: 20
 ---
 apiVersion: v1
