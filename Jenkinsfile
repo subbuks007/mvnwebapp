@@ -20,6 +20,9 @@ pipeline {
         // ═══════════════════════════════════════════════════════
 
         stage('Build & Unit Test') {
+            when {
+                not { branch 'master' }
+            }
             steps {
                 sh 'mvn -B clean package'
             }
@@ -274,36 +277,11 @@ pipeline {
                                   k8s/deployment-${K8S_NAMESPACE}.yaml > k8s-final-${K8S_NAMESPACE}.yaml
 
                                 kubectl apply -f k8s-final-${K8S_NAMESPACE}.yaml
-                                kubectl rollout status deployment/mvnwebapp -n ${K8S_NAMESPACE} --timeout=600s
+                                kubectl rollout status deployment/mvnwebapp -n ${K8S_NAMESPACE} --timeout=300s
 
                                 rm -f /tmp/kubeconfig-${BUILD_NUMBER}
                             '''
                             echo "Deployed to Kubernetes namespace: ${env.K8S_NAMESPACE}"
-                        }
-                    }
-                }
-
-                stage('Deploy to Tomcat') {
-                    steps {
-                        withVault(
-                            vaultSecrets: [[
-                                path: 'secret/jenkins/tomcat',
-                                secretValues: [
-                                    [envVar: 'TOMCAT_USER', vaultKey: 'username'],
-                                    [envVar: 'TOMCAT_PASS', vaultKey: 'password'],
-                                    [envVar: 'TOMCAT_URL',  vaultKey: 'url']
-                                ]
-                            ]]
-                        ) {
-                            script {
-                                env.DEPLOY_PATH = (env.BRANCH_NAME == 'master') ? WAR_NAME : "${WAR_NAME}-staging"
-                            }
-                            sh '''
-                                curl -u $TOMCAT_USER:$TOMCAT_PASS \
-                                  -T target/${WAR_NAME}.war \
-                                  "$TOMCAT_URL/manager/text/deploy?path=/${DEPLOY_PATH}&update=true"
-                                echo "Deployed to: $TOMCAT_URL/${DEPLOY_PATH}/"
-                            '''
                         }
                     }
                 }
